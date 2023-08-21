@@ -1,9 +1,9 @@
 # parameters
-ARG REPO_NAME="<REPO_NAME_HERE>"
-ARG DESCRIPTION="<DESCRIPTION_HERE>"
-ARG MAINTAINER="<YOUR_FULL_NAME> (<YOUR_EMAIL_ADDRESS>)"
+ARG REPO_NAME="DT_project_60"
+ARG DESCRIPTION="MEC4128S Final year proejct at UCT. Implements a ROS node to detect duckies"
+ARG MAINTAINER="Dino Claro clrdin001@myuct.ac.za"
 # pick an icon from: https://fontawesome.com/v4.7.0/icons/
-ARG ICON="cube"
+ARG ICON="life-ring"
 
 # ==================================================>
 # ==> Do not change the code below this line
