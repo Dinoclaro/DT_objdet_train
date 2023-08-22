@@ -14,7 +14,14 @@ dt-launchfile-init
 
 # launching app
 
-roslaunch my_package multiple_nodes.launch veh:=$VEHICLE_NAME
+export ROSCONSOLE_STDOUT_LINE_BUFFERED=1
+
+#source /code/catkin_ws/devel/setup.bash --extend
+#source /code/solution/devel/setup.bash --extend
+
+# dt-exec roslaunch --wait agent agent_node.launch &
+# dt-exec roslaunch --wait car_interface all.launch veh:=$VEHICLE_NAME &
+dt-exec roslaunch --wait od od_node.launch veh:=$VEHICLE_NAME
 
 # ----------------------------------------------------------------------------
 # YOUR CODE ABOVE THIS LINE

@@ -13,35 +13,50 @@ from .constants import IMAGE_SIZE, ASSETS_DIR, MODEL_NAME, DT_TOKEN
 JETSON_FP16 = True
 
 def run(input, exception_on_failure=False):
+    """
+    Provides options for handling exceptions and program output. 
+    Args:
+        input (str): The command to run.
+        exception_on_failure (bool): Whether to raise an exception on failure.
+    Returns:
+        str: The program output.
+    """
     print(input)
+
+    # Exception handling
     try:
         import subprocess
 
         program_output = subprocess.check_output(
             f"{input}", shell=True, universal_newlines=True, stderr=subprocess.STDOUT
-        )
+        )   # redirects stderr to stdout
     except Exception as e:
         if exception_on_failure:
             print(e.output)
             raise e
         program_output = e.output
+
     print(program_output)
     return program_output.strip()
 
 
 class Wrapper:
-    def __init__(self, aido_eval=False):
+    """
+    Wrapper class for the neural network model. Loads the model with the correct weights. 
+    """
+    def __init__(self):
+        # Constants
         model_name = MODEL_NAME()
-
-        models_path = os.path.join(ASSETS_DIR, "nn_models")
-        dcss_models_path = "courses/mooc/objdet/data/nn_models/"
-
-        dcss_weight_file_path = os.path.join(dcss_models_path, f"{model_name}.pt")
-        weight_file_path = os.path.join(models_path, f"{model_name}.pt")
-
-        
         dt_token = DT_TOKEN()
 
+        # local paths
+        models_path = os.path.join(ASSETS_DIR, "nn_models")
+        weight_file_path = os.path.join(models_path, f"{model_name}.pt")
+
+        # DCSS storage unit paths 
+        dcss_models_path = "courses/mooc/objdet/data/nn_models/"
+        dcss_weight_file_path = os.path.join(dcss_models_path, f"{model_name}.pt")
+        
         if get_device_hardware_brand() == DeviceHardwareBrand.JETSON_NANO:
             # when running on the robot, we store models in the persistent `data` directory
             models_path = "/data/nn_models"
@@ -98,37 +113,74 @@ class Wrapper:
         self.model = Model(weight_file_path)
 
     def predict(self, image: np.ndarray) -> Tuple[list, list, list]:
+        """
+        Runs inference on the given image using the model.
+        Args:
+            image (np.ndarray): The image to run inference on.
+        Returns:
+            Tuple[list, list, list]: The bounding boxes, classes, and scores.
+        """
         return self.model.infer(image)
 
 
 class Model:
+    """
+    Wrapper class for loading pytorch model.
+    """
     def __init__(self, weight_file_path: str):
-        super().__init__()
+        """
+        Constructor for the model wrapper.
+        Args:
+            weight_file_path (str): The path to the model weights file.
 
-        model = torch.hub.load("/yolov5", "custom", path=weight_file_path, source="local")
+        """
+        # call parent constructor
+        super().__init__() 
+
+        # load custom YOLOv5 model from local file
+        model = torch.hub.load("/yolov5", "custom", path=weight_file_path, source="local") 
+
+        # set model to evaluation mode
         model.eval()
 
+        # checks if the device is a Jetson Nano and if the model is FP16
         use_fp16: bool = JETSON_FP16 and get_device_hardware_brand() == DeviceHardwareBrand.JETSON_NANO
 
+        # convert model to half precision if FP16 is enabled
         if use_fp16:
             model = model.half()
-
+        
+        # move model to GPU if available
         if torch.cuda.is_available():
             self.model = model.cuda()
         else:
             self.model = model.cpu()
 
+        # save memory by disabling gradients
         del model
 
     def infer(self, image: np.ndarray) -> Tuple[list, list, list]:
+        """
+        Perform an inference using the loaded model.
+        Args:
+            image (np.ndarray): The image to run inference on.
+        Returns:
+            Tuple[list, list, list]: The bounding boxes, classes, and scores.
+        """
+        # perform inference
         det = self.model(image, size=IMAGE_SIZE)
 
+        # extract bounding boxes, classes, and scores
         xyxy = det.xyxy[0]  # grabs det of first image (aka the only image we sent to the net)
 
+        # check if there are any detections and convert to individual NumPy array
         if xyxy.shape[0] > 0:
             conf = xyxy[:, -2]
             clas = xyxy[:, -1]
             xyxy = xyxy[:, :-2]
-
+            
+            # convert to list and return
             return xyxy.tolist(), clas.tolist(), conf.tolist()
+        
+        # return empty lists if no detections
         return [], [], []

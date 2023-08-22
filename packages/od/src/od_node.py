@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import cv2
 import numpy as np
 import rospy
@@ -97,8 +99,8 @@ class OD_node(DTROS):
         # ROS utility to convert ROS image messages and OpenCV images
         self.bridge = CvBridge()
 
-        # Duckinator speed: default = 0.4
-        self.v = rospy.get_param("~speed", 0.4)
+        # Duckinator speed: default = 0.0
+        self.v = rospy.get_param("~speed", 0.0)
 
         # Load model
         self.log("Model loading!")
@@ -198,3 +200,50 @@ class OD_node(DTROS):
         Return: 
             bool: True if detection is valid, False otherwise
         """
+        # Maps the filter functions defined in utils.py over the results of the YOLO model to determine if it is a valid detection
+        box_ids = np.array(list(map(filter_by_boxes, bboxes))).nonzero()[0]
+        cls_ids = np.array(list(map(filter_by_classes, classes))).nonzero()[0]
+        sco_ids = np.array(list(map(filter_by_scores, scores))).nonzero()[0]
+
+        #  Find if there are any intersections
+        box_cla_int = set(list(box_ids)).intersection(set(list(cls_ids)))
+        box_cla_sco_int = set(list(sco_ids)).intersection(set(list(box_cla_int)))
+
+        if len(box_cla_sco_int) > 0:
+            return True
+        else: 
+            return False
+        
+    def pub_car_commands(self, stop, header):
+        """
+        Publishes car commands to the 'car_cmd_topic' topic
+
+        Args:
+            stop: boolean value to determine if car should stop
+            header: header of the image message
+        """
+
+        # Creates an instance of 'Twist2DStamped' message type
+        car_control_msg = Twist2DStamped()  
+        
+        # ensures proper co-ordination and synchronisation of messages
+        car_control_msg.header = header 
+
+        # Control duckiebot
+        if stop:
+            car_control_msg.v = 0.0
+        else:
+            car_control_msg.v = self.v
+
+        # Drive straight 
+        car_control_msg.omega = 0.0
+
+        self.pub_car_cmd.publish(car_control_msg)
+
+
+if __name__ == "__main__":
+    # Intialise the node
+    object_detection_node = OD_node(node_name="object_detection_node")
+
+    # Ensure that the node stays active and continues to interact with the ROS ecosystem
+    rospy.spin()

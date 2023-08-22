@@ -1,18 +1,11 @@
 <launch>
+    <arg name="veh"/>
+	<arg name="param_file_name" default="default"/>
+	<arg name="pkg_name" default="od" doc="name of the package"/>
+	<arg name="node_name" default="od_node" doc="name of the node"/>
 
-  <group ns="$(arg veh)">  
-
-    <node pkg="my_package" type="my_publisher_node.py" name="my_publisher_node_1" output="screen"/>
-    <node pkg="my_package" type="my_publisher_node.py" name="my_publisher_node_2" output="screen"/>
-
-    <node pkg="my_package" type="my_subscriber_node.py" name="my_subscriber_node_1"  output="screen">
-        <remap from="~/chatter" to="/$(arg veh)/my_publisher_node_1/chatter"/>
+    <node ns="$(arg veh)"  pkg="$(arg pkg_name)" type="$(arg node_name).py" name="$(arg node_name)" output="screen" required="true">
+        <rosparam command="load" file="$(find od)/config/$(arg node_name)/$(arg param_file_name).yaml"/>
     </node>
-
-    <node pkg="my_package" type="my_subscriber_node.py" name="my_subscriber_node_2"  output="screen">
-        <remap from="~/chatter" to="/$(arg veh)/my_publisher_node_2/chatter"/>
-    </node>
-
-   </group>
 
 </launch>

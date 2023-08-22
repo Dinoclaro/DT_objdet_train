@@ -1,5 +1,5 @@
 <package>
-  <name>od/name>
+  <name>od</name>
   <version>0.1.0</version>
   <description>
   Object Detection node for duckiebot
