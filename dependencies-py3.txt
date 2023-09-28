@@ -1,5 +1,4 @@
 # LIST YOUR PYTHON3 PACKAGES HERE
-
 aido-protocols-daffy
 duckietown-world-daffy
 
@@ -13,8 +12,6 @@ git+https://github.com/duckietown/lib-dt-mooc@v0.0.5
 gitpython
 
 pyglet==1.5.15
-
-torch==1.7.0 torchvision==0.8
 
 # used to interface with the DCSS
 dt-data-api-daffy>=0.1.8
