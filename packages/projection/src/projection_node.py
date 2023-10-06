@@ -158,7 +158,7 @@ class ProjectionNode(DTROS):
         if self.camera_info_received:
             detectionsList_out = SegmentList()
             #detectionsList_out.header = detections_msg.header
-            self.log(f"Received segments: {detections_msg}")
+            #self.log(f"Received segments: {detections_msg}")
 
             bboxes = []
             for i in range(len(detections_msg.data) // 4):
@@ -180,7 +180,7 @@ class ProjectionNode(DTROS):
                 # Center 
                 ground_bbox.points[0] = self.pixel_msg_to_ground_msg(top_left_norm)
                 ground_bbox.points[1] = self.pixel_msg_to_ground_msg(bottom_right_norm)
-                self.log(f"--------------------------------------->Recieved bbox: ({top_left_norm},{bottom_right_norm}) \n Projected bbox: {ground_bbox}")
+                #self.log(f"--------------------------------------->Recieved bbox: ({top_left_norm},{bottom_right_norm}) \n Projected bbox: {ground_bbox}")
                 # TODO what about normal and points
                 detectionsList_out.segments.append(ground_bbox)
             #self.log(f"Projected segments{ground_bbox}")
@@ -230,18 +230,9 @@ class ProjectionNode(DTROS):
             self.logerr(msg)
             rospy.signal_shutdown(msg)
 
-        K = np.array([[237.68504455, -2.28865119, 318.4816036],
-              [0, 239.20805664, 241.29716904],
-              [0, 0, 1]])
-
-        R = np.array([[-0.8990, -0.3768, -0.1227],
-              [-0.4372, 0.7442, 0.2956],
-              [0.0243, -0.5515, 1]])
-
-        result = np.dot(K, R)
-        return result.reshape((1,9))
         #return calib_data["homography"]
         #return [0, -1, 0, 1, 0, 0, 0, 0, 1]
+        return [-26.933, -63.336, 356.988, 309.672, -49.979, 259.2966, -0.0185, -0.2815, 1]
 
     def debug_image(self, detectionsList_out):
         """
@@ -360,7 +351,7 @@ class ProjectionNode(DTROS):
                              pt2= pt2,
                              color=(255, 0, 0), 
                              thickness=1)
-            self.log(f"-------------------------------------->Projected bbox: {pt1}, {pt2}")
+            #self.log(f"-------------------------------------->Projected bbox: {pt1}, {pt2}")
         return image
 
 

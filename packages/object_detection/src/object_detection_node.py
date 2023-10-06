@@ -145,6 +145,9 @@ class ObjectDetectionNode(DTROS):
             for clas, box in zip(classes, bboxes):
                 pt1 = np.array([int(box[0]), int(box[1])])
                 pt2 = np.array([int(box[2]), int(box[3])])
+                height = int(box[3]-box[1])
+                distance = int(34.1549*np.exp(height*-0.0275283))
+                self.log(f"Height: {height}")
                 pt1 = tuple(pt1)
                 pt2 = tuple(pt2)
                 color = tuple(reversed(colors[clas]))
@@ -153,8 +156,14 @@ class ObjectDetectionNode(DTROS):
                 rgb = cv2.rectangle(rgb, pt1, pt2, color, 2)
                 # label location
                 text_location = (pt1[0], min(pt2[1] + 30, IMAGE_SIZE))
-                # draw label underneath the bounding box
-                rgb = cv2.putText(rgb, name, text_location, font, 1, color, thickness=2)
+                distance_location = (pt1[0], min(pt2[1] + 60, IMAGE_SIZE))
+                if distance < 0:
+                    distance = 0
+
+                #draw label underneath the bounding box
+                #rgb = cv2.putText(rgb, name, text_location, font, 1, color, thickness=2)
+                if distance < 20:
+                    distance =  cv2.putText(rgb, str(distance), text_location, font, 1, color, thickness=2)
 
             bgr = rgb[..., ::-1]
             obj_det_img = self.bridge.cv2_to_compressed_imgmsg(bgr)
