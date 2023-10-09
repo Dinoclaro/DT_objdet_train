@@ -260,9 +260,9 @@ class ObjectDetectionNode(DTROS):
                 # Project coners
                 top_left_proj = self.pixel_msg_to_ground_msg(top_left_norm)
                 bottom_right_proj = self.pixel_msg_to_ground_msg(bottom_right_norm)
-
+                self.log(f"top left: {top_left_proj} and top right: {bottom_right_proj}")
                 # Width of projected bbox
-                width = abs(top_left_proj.x - bottom_right_proj.x)*IMAGE_SIZE
+                width = abs(top_left_proj.x - bottom_right_proj.x)
                 self.log(f"Width: {width}")
                 if width > self.width_limit: 
                     self.log(f"Duckie pedestrian detected... stopping: {width} > {self.width_limit}")
@@ -356,8 +356,10 @@ class ObjectDetectionNode(DTROS):
             rospy.signal_shutdown(msg)
 
         #return calib_data["homography"]
-        return [0, -1, 0, 1, 0, 0, 0, 0, 1]
-        #return [-26.933, -63.336, 356.988, 309.672, -49.979, 259.2966, -0.0185, -0.2815, 1]
+        return [ 1.82203658e+03, -1.56158769e+03, -1.28644790e+02, 2.61397592e+01, -5.24000155e+02 , 3.36076212e+02, 5.52198798e-02, -4.79082630e+00 , 1.00000000e+00] # H
+        # return [5.42198284e-04 , 1.08726078e-03, -2.95651501e-01, -3.78495070e-06, 9.13150386e-04, -3.07375037e-01, -4.80731654e-05, 4.31470648e-03, -4.56254571e-01] # H_inv
+        return [ 1.18639763e+00,  2.37906249e+00, -6.46922450e+02,-3.43690957e-02,  4.33948414e+00, -9.20163814e+02, -1.05190128e-04, 9.44111681e-03, -9.98342018e-01]
+        #return [0, -1, 0, 1, 0, 0, 0, 0, 1]
     
 if __name__ == "__main__":
     # Initialize the node
