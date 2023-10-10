@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 
 import cv2
-import os
-import yaml
+import math
 import numpy as np
 import rospy
+from typing import Optional, Tuple
 
 from cv_bridge import CvBridge
 from duckietown.dtros import DTROS, NodeType, TopicType
@@ -79,7 +79,7 @@ class ObjectDetectionNode(DTROS):
 
         self.bridge = CvBridge()
         # Configure AIDO
-        self.v = rospy.get_param("~speed", 0.0)
+        self.v = 0.2
         aido_eval = rospy.get_param("~AIDO_eval", False)
         self.log(f"AIDO EVAL VAR: {aido_eval}")
         self.log("Starting model loading!")
@@ -91,20 +91,15 @@ class ObjectDetectionNode(DTROS):
         self.frame_id = 0
         self.first_image_received = False
 
-        # Initialise Ground projection utils
-        self.ground_projector = None
-        self.debug_img_bg = None
-        self.rectifier = None
-        self.homography = self.load_extrinsics()
-        self.log(f"Loaded homography matrix: {np.array(self.homography).reshape((3, 3))}")
-        self.camera_info = get_camera_info_default()
-        self.camera_info_received = True
-        self.log("loaded camera info")
-        self.rectifier = Rectify(self.camera_info)
-        self.ground_projector = GroundProjectionGeometry(
-            im_width=IMAGE_SIZE, im_height=IMAGE_SIZE, homography=np.array(self.homography).reshape((3, 3)))
-        self.log("CameraInfo received.")
-        self.camera_info_received = True
+        # Initialise Braitenburg constants
+        self.gain: float = 10.0
+        self.omega: float = 0.0
+        self.l_max = -math.inf
+        self.r_max = -math.inf
+        self.l_min = math.inf
+        self.r_min = math.inf
+        self.left  = None
+        self.right = None
 
         self.first_processing_done = False
 
@@ -126,7 +121,7 @@ class ObjectDetectionNode(DTROS):
         self.frame_id = self.frame_id % (1 + NUMBER_FRAMES_SKIPPED())
 
         if self.frame_id != 0:
-            self.pub_car_commands(self.avoid_duckies, image_msg.header)
+            self.pub_car_commands(self.omega, image_msg.header)
             return
 
         # Decode from compressed image with OpenCV
@@ -146,14 +141,40 @@ class ObjectDetectionNode(DTROS):
         bboxes, classes, scores = self.model_wrapper.predict(rgb)
         detection = self.det2bool(bboxes, classes, scores)
 
-        # Only project if a valid detection
+
+        # Only move for a valid detection
         if detection:
             self.log("Valid Detection")
-            self.projection(bboxes, image_msg.header)
+            map_bare = np.zeros((IMAGE_SIZE, IMAGE_SIZE, 3), np.uint8)
 
+            for clas, box in zip(classes, bboxes):
+                pt1 = np.array([int(box[0]), int(box[1])])
+                pt2 = np.array([int(box[2]), int(box[3])])
+
+                pt1 = tuple(pt1)
+                pt2 = tuple(pt2)
+
+                color = (0, 0, 255)
+                # draw bounding box
+                map_bbox = cv2.rectangle(map_bare, pt1, pt2, color, thickness = -1)
+
+
+            # Wheel commands
+            map = map_bbox[:, :, 2]  # Index 0 corresponds to the red channel
+            sum = np.sum(map)
+            self.log(f"Sum: {sum}")
+            self.omega = self.compute_commands(map)
+            self.pub_car_commands(self.omega, image_msg.header)
+            
+
+            # Publish image
+            map_bgr = map_bbox[..., ::-1]
+            weight_img = self.bridge.cv2_to_compressed_imgmsg(map_bgr)
+            self.pub_debug_img.publish(weight_img)
         else:
-            self.pub_car_commands(self.avoid_duckies, image_msg.header)
-
+            self.pub_car_commands(self.omega, image_msg.header)
+        
+        # Publish debug image
         if self._debug:
             colors = {0: (0, 255, 255), 1: (0, 165, 255), 2: (0, 250, 0), 3: (0, 0, 255), 4: (255, 0, 0)}
             names = {0: "duckie", 1: "cone", 2: "truck", 3: "bus", 4: "duckiebot"}
@@ -161,29 +182,22 @@ class ObjectDetectionNode(DTROS):
             for clas, box in zip(classes, bboxes):
                 pt1 = np.array([int(box[0]), int(box[1])])
                 pt2 = np.array([int(box[2]), int(box[3])])
-                #height = int(box[3]-box[1])
-                #distance = int(34.1549*np.exp(height*-0.0275283))
+
                 pt1 = tuple(pt1)
                 pt2 = tuple(pt2)
+
                 color = tuple(reversed(colors[clas]))
                 name = names[clas]
-                # draw bounding box
-                rgb = cv2.rectangle(rgb, pt1, pt2, color, 2)
+
                 # label location
                 text_location = (pt1[0], min(pt2[1] + 30, IMAGE_SIZE))
-                #distance_location = (pt1[0], min(pt2[1] + 60, IMAGE_SIZE))
-                # if distance < 0:
-                #     distance = 0
-                #draw label underneath the bounding box
+                rgb = cv2.rectangle(rgb, pt1, pt2, color, thickness = 2)
                 rgb = cv2.putText(rgb, name, text_location, font, 1, color, thickness=2)
-                # if distance < 20:
-                #     distance =  cv2.putText(rgb, str(distance), text_location, font, 1, color, thickness=2)
 
             # Publish detection debug image
             bgr = rgb[..., ::-1]
             obj_det_img = self.bridge.cv2_to_compressed_imgmsg(bgr)
             self.pub_detections_image.publish(obj_det_img)
-
 
     def det2bool(self, bboxes, classes, scores):
         box_ids = np.array(list(map(filter_by_bboxes, bboxes))).nonzero()[0]
@@ -198,168 +212,80 @@ class ObjectDetectionNode(DTROS):
         else:
             return False
     
-    def pub_car_commands(self, stop, header):
+    def compute_commands(self, map) -> float:
+        """Returns the commands (pwm_left, pwm_right)"""
+
+        # If we have not received any image, we don't move
+        if map is None:
+            return 0.0
+
+        if self.left is None:
+            # if it is the first time, we initialize the structures
+            shape = map.shape[0], map.shape[1]
+            self.left = self.get_motor_left_matrix(shape)
+            self.right = self.get_motor_right_matrix(shape)
+
+        # now we just compute the activation of our sensors
+        l = float(np.sum(map * self.left))
+        r = float(np.sum(map * self.right))
+
+        self.log(f"Before normalization: {l}, {r}")
+        # These are big numbers -- we want to normalize them.
+        # We normalize them using the history
+
+        # first, we remember the high/low of these raw signals
+        self.l_max = max(l, self.l_max)
+        self.r_max = max(r, self.r_max)
+        self.l_min = min(l, self.l_min)
+        self.r_min = min(r, self.r_min)
+
+
+        # now rescale from 0 to 1
+        ls = self.rescale(l, self.l_min, self.l_max)
+        rs = self.rescale(r, self.r_min, self.r_max)
+    
+        gain = self.gain
+        left =  ls * gain
+        right = -rs * gain
+
+        self.log(f"ls: {ls}, rs: {rs}")
+        self.omega = left+right
+        self.log(f"omega: {self.omega}")
+        return self.omega
+    
+    def pub_car_commands(self, omega, header):
+        # TODO: must change this publish pwm to each wheel
         car_control_msg = Twist2DStamped()
         car_control_msg.header = header
 
-        if stop:
-            car_control_msg.v = 0.0
-        else:
-            car_control_msg.v = self.v
-
         # always drive straight
-        car_control_msg.omega = 0.0
+        car_control_msg.v = self.v
+
+        # Turn based on bratienburg
+        car_control_msg.omega = omega
 
         self.pub_car_cmd.publish(car_control_msg)
     
-    def pixel_msg_to_ground_msg(self, point_msg) -> PointMsg:
-        """
-        Creates a :py:class:`ground_projection.Point` object from a normalized point message from an
-        unrectified
-        image. It converts it to pixel coordinates and rectifies it. Then projects it to the ground plane and
-        converts it to a ROS Point message.
 
-        Args:
-            point_msg (:obj:`geometry_msgs.msg.Point`): Normalized point coordinates from an unrectified
-            image.
-
-        Returns:
-            :obj:`geometry_msgs.msg.Point`: Point coordinates in the ground reference frame.
-        """
-        # normalized coordinates to pixel:
-        norm_pt = Point.from_message(point_msg)
-
-        ground_pt = self.ground_projector.pixel2ground(norm_pt)
-        # point to message
-        ground_pt_msg = PointMsg()
-        ground_pt_msg.x = ground_pt.x
-        ground_pt_msg.y = ground_pt.y
-        ground_pt_msg.z = ground_pt.z
-
-        return ground_pt_msg
+    def rescale(self, a: float, L: float, U: float):
+        if np.allclose(L, U):
+            return 0.0
+        return (a - L) / (U - L)
     
-    def projection(self, bboxes, header):
+    def get_motor_left_matrix(self, shape: Tuple[int, int]) -> np.ndarray:
+        res = np.zeros(shape=shape, dtype="float32")
+        res[:, :int(shape[1]/2)] = 1
 
-        def create_vector(x, y):
-            vector = Vector2D()
-            vector.x = x
-            vector.y = y
-            return vector
-        
-        projected_bboxes = []
-
-        if self.camera_info_received:
-
-            for received_bbox in bboxes:
-                x_TL, y_TL, x_BR, y_BR = received_bbox
-
-                # Normalise the detected corners
-                top_left_norm = create_vector(x_TL/IMAGE_SIZE, y_TL/IMAGE_SIZE)
-                bottom_right_norm = create_vector(x_BR/IMAGE_SIZE, y_BR/IMAGE_SIZE)
-
-                # Project coners
-                top_left_proj = self.pixel_msg_to_ground_msg(top_left_norm)
-                bottom_right_proj = self.pixel_msg_to_ground_msg(bottom_right_norm)
-                self.log(f"top left: {top_left_proj} and top right: {bottom_right_proj}")
-                # Width of projected bbox
-                width = abs(top_left_proj.x - bottom_right_proj.x)
-                self.log(f"Width: {width}")
-                if width > self.width_limit: 
-                    self.log(f"Duckie pedestrian detected... stopping: {width} > {self.width_limit}")
-                    self.avoid_duckies = True
-
-                # Store the projected bounding box as a tuple (x_TL, y_TL, x_BR, y_BR)
-                projected_bboxes.append((top_left_proj.x, top_left_proj.y, bottom_right_proj.x, bottom_right_proj.y))
-
-            if not self.first_processing_done:
-                self.log("First projected segments published.")
-                self.first_processing_done = True
-
-            # Generate debug image
-            debug_image_msg = self.bridge.cv2_to_compressed_imgmsg(self.debug_image(projected_bboxes))
-            debug_image_msg.header = header
-            self.pub_debug_img.publish(debug_image_msg)
-
-            # Publish wheel commands
-            self.pub_car_commands(self.avoid_duckies, header)
-
-        else:
-            self.log("Waiting for a CameraInfo message", "warn")
+        return res
 
 
-    def debug_image(self, projected_bboxes):
-        """
-        Generates a debug image with all the projected segments plotted with respect to the robot's origin.
+    def get_motor_right_matrix(self, shape: Tuple[int, int]) -> np.ndarray:
 
-        Args:
-            seg_list (:obj:`duckietown_msgs.msg.SegmentList`): Line segments in the ground plane relative
-            to the robot origin
+        res = np.zeros(shape=shape, dtype="float32")
+        # these are random values
+        res[:, int(shape[1]/2):] = 1
 
-        Returns:
-            :obj:`numpy array`: an OpenCV image
-
-        """
-        # Duckietown Recommendations
-            # dimensions of the image are 1m x 1m so, 1px = 2.5mm
-            # the origin is at x=200 and y=300
-            
-        # if that's the first call, generate the background
-        if self.debug_img_bg is None:
-            self.debug_img_bg = np.ones((IMAGE_SIZE, IMAGE_SIZE, 3), np.uint8) * 128
-
-        image = self.debug_img_bg.copy()
-        
-        for bbox in projected_bboxes:
-            x_TL_proj, y_TL_proj, x_BR_proj, y_BR_proj = bbox
-
-            # Calculate pt1 and pt2 based on the projected points
-            pt1 = (int(abs(x_TL_proj * -IMAGE_SIZE)), int(abs(y_TL_proj * IMAGE_SIZE)))
-            pt2 = (int(abs(x_BR_proj * -IMAGE_SIZE)), int(abs(y_BR_proj * IMAGE_SIZE)))
-
-            cv2.rectangle(image, 
-                             pt1=pt1,
-                             pt2= pt2,
-                             color=(255, 0, 0), 
-                             thickness=1)
-        return image
-
-    def load_extrinsics(self):
-        """
-        Loads the homography matrix from the extrinsic calibration file.
-
-        Returns:
-            :obj:`numpy array`: the loaded homography matrix
-
-        """
-        # load intrinsic calibration
-        cali_file_folder = "/data/config/calibrations/camera_extrinsic/"
-        cali_file = cali_file_folder + rospy.get_namespace().strip("/") + ".yaml"
-
-        # Locate calibration yaml file or use the default otherwise
-        if not os.path.isfile(cali_file):
-            self.log(
-                f"Can't find calibration file: {cali_file}.\n Using default calibration instead.", "warn"
-            )
-            cali_file = os.path.join(cali_file_folder, "default.yaml")
-
-        # Shutdown if no calibration file not found
-        if not os.path.isfile(cali_file):
-            msg = "Found no calibration file ... aborting"
-            self.logerr(msg)
-            rospy.signal_shutdown(msg)
-        try:
-            with open(cali_file, "r") as stream:
-                calib_data = yaml.load(stream, Loader=yaml.Loader)
-        except yaml.YAMLError:
-            msg = f"Error in parsing calibration file {cali_file} ... aborting"
-            self.logerr(msg)
-            rospy.signal_shutdown(msg)
-
-        #return calib_data["homography"]
-        return [ 1.82203658e+03, -1.56158769e+03, -1.28644790e+02, 2.61397592e+01, -5.24000155e+02 , 3.36076212e+02, 5.52198798e-02, -4.79082630e+00 , 1.00000000e+00] # H
-        # return [5.42198284e-04 , 1.08726078e-03, -2.95651501e-01, -3.78495070e-06, 9.13150386e-04, -3.07375037e-01, -4.80731654e-05, 4.31470648e-03, -4.56254571e-01] # H_inv
-        return [ 1.18639763e+00,  2.37906249e+00, -6.46922450e+02,-3.43690957e-02,  4.33948414e+00, -9.20163814e+02, -1.05190128e-04, 9.44111681e-03, -9.98342018e-01]
-        #return [0, -1, 0, 1, 0, 0, 0, 0, 1]
+        return res
     
 if __name__ == "__main__":
     # Initialize the node

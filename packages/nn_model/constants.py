@@ -19,7 +19,7 @@ def MODEL_NAME() -> str:
 def NUMBER_FRAMES_SKIPPED() -> int:
     # TODO: change this number to drop more frames
     # (must be a positive integer)
-    return 5
+    return 1
 
 
 def filter_by_classes(pred_class: int) -> bool:
@@ -63,5 +63,5 @@ def filter_by_bboxes(bbox: Tuple[int, int, int, int]) -> bool:
                 This means the shape of bbox is (leftmost x pixel, topmost y, rightmost x, bottommost y)
     """
     # TODO: Like in the other cases, return False if the bbox should not be considered.
-    if abs((bbox[2]-bbox[0])*(bbox[3]-bbox[1])) > 100:
+    if abs((bbox[2]-bbox[0])*(bbox[3]-bbox[1])) > 200:
         return True
