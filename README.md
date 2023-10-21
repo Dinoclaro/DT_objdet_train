@@ -20,7 +20,7 @@ This repository contains two directories of code used in Project 60 of the 2023 
 
 ## Instructions
 
-1.  **Clone the Repository:**
+1. **Clone the Repository:**
    - Open your terminal or command prompt.
    - Navigate to the directory where you want to store the local copy of this repository.
    - Use the following Git command to clone the repository:
@@ -28,6 +28,6 @@ This repository contains two directories of code used in Project 60 of the 2023 
      git clone https://github.com/Dinoclaro/DT_project_60.git
      ```
 
-2.**Clone the `duckietown-lx`**: follow [these](https://github.com/duckietown/duckietown-lx) instructions
+2. **Clone the `duckietown-lx`**: follow [these](https://github.com/duckietown/duckietown-lx) instructions
 
-4. Navigate to the `DT_train` directory in this repository. The directory outlines the procedure to generate the dataset and then train the YOLOv5 model.
+3. Navigate to the `DT_train` directory in this repository. The directory outlines the procedure to generate the dataset and then train the YOLOv5 model.
