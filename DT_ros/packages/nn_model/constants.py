@@ -3,22 +3,22 @@ from typing import Tuple
 
 ASSETS_DIR = "/code/catkin_ws/src/object-detection/assets"
 IMAGE_SIZE = 416
+SCORE = 0.8 
+AREA = 1000
 
 def DT_TOKEN() -> str:
-    # TODO: change this to your duckietown token
     dt_token = "dt1-3nT8KSoxVh4MnDRxovGLkXZDhPpgc4SzasJBTSxbRUfDguS-43dzqWFnWd8KBa1yev1g3UKnzVxZkkTbfeFCAD1kMCPQvvSVDYPfoXapvF29wVgdC7"
+
     return dt_token
 
 
 def MODEL_NAME() -> str:
-    # TODO: change this to your model's name that you used to upload it on google colab.
-    # if you didn't change it, it should be "yolov5n"
+
     return "yolov5n"
 
 
 def NUMBER_FRAMES_SKIPPED() -> int:
-    # TODO: change this number to drop more frames
-    # (must be a positive integer)
+
     return 1
 
 
@@ -32,7 +32,7 @@ def filter_by_classes(pred_class: int) -> bool:
         | Cone      | 1     |
         | Truck     | 2     |
         | Bus       | 3     |
-
+        | Duckiebot | 4     | 
 
     Args:
         pred_class: the class of a prediction
@@ -41,6 +41,7 @@ def filter_by_classes(pred_class: int) -> bool:
     # TODO: Change this to only return True for duckies!
     # In other words, returning False means that this prediction is ignored.
     #if (pred_class == 0) | (pred_class == 4):
+
     return True
 
 
@@ -49,10 +50,7 @@ def filter_by_scores(score: float) -> bool:
     Args:
         score: the confidence score of a prediction
     """
-    # Right now, this returns True for every object's confidence
-    # TODO: Change this to filter the scores, or not at all
-    # (returning True for all of them might be the right thing to do!)
-    if (score > 0.8):
+    if (score > SCORE):
         return True
 
 
@@ -62,6 +60,6 @@ def filter_by_bboxes(bbox: Tuple[int, int, int, int]) -> bool:
         bbox: is the bounding box of a prediction, in xyxy format
                 This means the shape of bbox is (leftmost x pixel, topmost y, rightmost x, bottommost y)
     """
-    # TODO: Like in the other cases, return False if the bbox should not be considered.
-    if abs((bbox[2]-bbox[0])*(bbox[3]-bbox[1])) > 200:
+
+    if abs((bbox[2]-bbox[0])*(bbox[3]-bbox[1])) > AREA:
         return True

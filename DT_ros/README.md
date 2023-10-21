@@ -2,7 +2,7 @@
 
 ## About the Directory
 
-This directory contains the ROS agent to run the YOLOv5 model and the Braitenberg controller. This ROS agent is based on the ROS-agent for the `object-detection` learning experience (lx) and runs within the `duckietown-lx` environment.  
+This directory contains the ROS agent to run the YOLOv5 model and the Braitenberg controller as Duckietown compliant Docker image. This ROS agent is based on the ROS-agent for the [object-detection](https://github.com/duckietown/duckietown-lx/tree/mooc2022/object-detection) learning experience (lx) and runs within the [duckietown-lx](https://github.com/duckietown/duckietown-lx) environment.  
 
 ## Prerequisites
 
@@ -12,7 +12,7 @@ The list below states the prerequisites to use this directory.
 
 ## Instructions
 
-1. Navigate to the `.dt-shell/recipes/duckietown/duckietown-lx-recipes/mooc2022/object-detection` directory. `.dt-shell` is a hidden folder that should be in `Home` directory. This folder contains recipes and other utilities for running the lx that are not included in the `duckietown-lx` directory
+1. Navigate to the `.dt-shell/recipes/duckietown/duckietown-lx-recipes/mooc2022/object-detection` directory. `.dt-shell` is a hidden folder that should be in `Home` directory. The folder contains recipes and other utilities for running the lx that are not included in the `duckietown-lx` directory.  
 
 2. Replace all the contents of `package` directory with the content in this directory.
 

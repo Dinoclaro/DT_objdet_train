@@ -5,19 +5,15 @@ import math
 import numpy as np
 import rospy
 import time
-from typing import Optional, Tuple
+from typing import  Tuple
 
 from cv_bridge import CvBridge
 from duckietown.dtros import DTROS, NodeType, TopicType
-from duckietown_msgs.msg import  Twist2DStamped, EpisodeStart, WheelsCmdStamped
+from duckietown_msgs.msg import  EpisodeStart, WheelsCmdStamped
 from sensor_msgs.msg import CompressedImage
-from geometry_msgs.msg import Point as PointMsg
 
-from image_processing.utils import get_camera_info_default
-from image_processing.rectification import Rectify
-from image_processing.ground_projection_geometry import GroundProjectionGeometry, Point
 from nn_model.model import Wrapper
-from nn_model.constants import IMAGE_SIZE
+from nn_model.constants import IMAGE_SIZE, AREA, SCORE
 from nn_model.constants import \
     NUMBER_FRAMES_SKIPPED, \
     filter_by_classes, \
@@ -36,22 +32,27 @@ class ObjectDetectionNode(DTROS):
         # Get vehicle name
         self.veh = rospy.get_namespace().strip("/")
         self.avoid_duckies = False
-        self.gain: float = 1 # 3
-        self.const: float = 0.3 # 0.3
+        self.gain: float = 1 
+        self.const: float = 0.3 
+        self.straight = 0 
+        self.pwm_left = self.const
+        self.pwm_right = self.const
         self.l_max = -math.inf
         self.r_max = -math.inf
         self.l_min = math.inf
         self.r_min = math.inf
         self.left  = None
         self.right = None
+        self.execution_times = [] # YOLO
+        self.compute_times = [] # Braitenberg controller
 
 
         # Construct publishers
         wheels_cmd_topic = f"/{self.veh}/wheels_driver_node/wheels_cmd"
-        self.pub_car_cmd = rospy.Publisher(
+        self.pub_wheel_cmd = rospy.Publisher(
             wheels_cmd_topic,
             WheelsCmdStamped,
-            queue_size=1,
+            queue_size=5,
             dt_topic_type=TopicType.CONTROL
         )
 
@@ -63,7 +64,7 @@ class ObjectDetectionNode(DTROS):
         )
 
         self.pub_debug_img = rospy.Publisher(
-            "~debug/ground_projection_image/compressed",
+            "~debug/debug_image/compressed",
             CompressedImage,
             queue_size=1,
             dt_topic_type=TopicType.DEBUG,
@@ -87,6 +88,7 @@ class ObjectDetectionNode(DTROS):
         )
 
         self.bridge = CvBridge()
+
         # Configure AIDO
         self.v = 0.2
         aido_eval = rospy.get_param("~AIDO_eval", False)
@@ -94,16 +96,15 @@ class ObjectDetectionNode(DTROS):
         self.log("Starting model loading!")
         
         # Load Yolo model
-        self._debug = rospy.get_param("~debug", False)
         self._debug = rospy.get_param("~debug", True)
         self.model_wrapper = Wrapper(aido_eval)
         self.log("Finished model loading!")
         self.frame_id = 0
         self.count = 0
 
-        # Choose Bratienburg config 
+        # Choose Bratienberg config 
         self.type = 0 # 0 for FEAR, 1 for EXPLORE
-        self.weight = 1  # 0 for Basic, 1 half, 2 for half and triangle
+        self.weight = 0  # 0 for Basic, 1 half, 2 for half and triangle
         self.first_image_received = False
 
         self.first_processing_done = False
@@ -114,11 +115,21 @@ class ObjectDetectionNode(DTROS):
     def cb_episode_start(self, msg: EpisodeStart):
         self.log("Episode started")
         self.avoid_duckies = False
-        self.pub_car_commands(self.const, self.const, msg.header)
+        self.pub_wheel_commands(self.const, self.const, msg.header)
 
     def image_cb(self, image_msg):
+        '''
+        Callback function for processing incoming image messages. Applies YOLOv5 object detection to the image, calls the compute_commands function if a valid detection and publishes the resulting image with bounding boxes and class labels.
+
+        Args:
+            image_msg (sensor_msgs.msg.Image): The incoming image message.
+z
+        Returns:
+            None
+        '''
         if not self.initialized:
-            #self.pub_car_commands(self.const, self.const, image_msg.header)
+            self.straight  = self.rescale(self.const, 0, (self.gain + self.const)) 
+            self.pub_wheel_commands(self.straight , self.straight , image_msg.header)
             return
 
         # Only call Yolo model after user specified frames
@@ -126,7 +137,7 @@ class ObjectDetectionNode(DTROS):
         self.frame_id = self.frame_id % (1 + NUMBER_FRAMES_SKIPPED())
 
         if self.frame_id != 0:
-            # self.pub_car_commands(self.const, self.const, image_msg.header)
+            self.pub_wheel_commands(self.pwm_left, self.pwm_right, image_msg.header)
             return
 
         # Decode from compressed image with OpenCV
@@ -147,73 +158,46 @@ class ObjectDetectionNode(DTROS):
 
         bboxes, classes, scores = self.model_wrapper.predict(rgb)
 
-        yolo_time = time.time()
-        execution_time = yolo_time - start_time
-        self.log(f"YOLO time: {execution_time}")
+        execution_time = time.time() - start_time
+        self.execution_times.append(execution_time)
+        min_time_yolo = min(self.execution_times)
+        max_time_yolo = max(self.execution_times)
+        avg_time_yolo = sum(self.execution_times) / len(self.execution_times)
+        self.log(f"YOLO time: Min: {min_time_yolo} \n Max:{max_time_yolo} \n Avg:{avg_time_yolo}")
 
         detection = self.det2bool(bboxes, classes, scores)
 
-
         # Only move for a valid detection
+        map_bare = np.zeros((IMAGE_SIZE, IMAGE_SIZE, 3), np.uint8)
         if detection:
-            #self.log("Valid Detection")
-            map_bare = np.zeros((IMAGE_SIZE, IMAGE_SIZE, 3), np.uint8)
+            map_bare = self.valid_detection(map_bare, bboxes, classes, scores)
+                    # Wheel commands
 
-            for clas, box in zip(classes, bboxes):
-                # TODO: Make this only for duckies above the minimum bbox size
-                pt1 = np.array([int(box[0]), int(box[1])])
-                pt2 = np.array([int(box[2]), int(box[3])])
-
-                pt1 = tuple(pt1)
-                pt2 = tuple(pt2)
-
-                color = (0, 0, 255)
-                # draw bounding box
-                map_bbox = cv2.rectangle(map_bare, pt1, pt2, color, thickness = 1)
-
-
-            # Wheel commands
-            map = map_bbox[:, :, 2]  # Index 0 corresponds to the red channel
-            vel = self.compute_commands(map)
-            comm_time = time.time()
-            exec_comm_time = comm_time -start_time
-            self.log(f"Wheel command time: {exec_comm_time}")
-            self.pub_car_commands(vel[0], vel[1], image_msg.header)
-            
-
-            # Publish image
-            map_bgr = map_bbox[..., ::-1]
-            weight_img = self.bridge.cv2_to_compressed_imgmsg(map_bgr)
-            self.pub_debug_img.publish(weight_img)
-        # else:
-        #     self.pub_car_commands(self.const, self.const, image_msg.header)
+            map = map_bare[:, :, 2]  # Index 0 corresponds to the red channel
+            self.compute_commands(map)
+            compute_time = time.time() - start_time
+            self.compute_times.append(compute_time)
+            min_time_cont = min(self.compute_times)
+            max_time_cont = max(self.compute_times)
+            avg_time_cont = sum(self.compute_times) / len(self.compute_times)
+            self.log(f"Compute time: Min: {min_time_cont} \n Max:{max_time_cont} \n Avg:{avg_time_cont}")
+            self.pub_wheel_commands(self.pwm_left, self.pwm_right, image_msg.header)
+        else:
+            # self.pwm_left = self.straight 
+            # self.pwm_right = self.straight 
+            self.pwm_left = 0.0
+            self.pwm_right = 0.0
+            self.pub_wheel_commands(self.pwm_left, self.pwm_right, image_msg.header)
         
+        # Publish image
+        map_bgr = map_bare[..., ::-1]
+        weight_img = self.bridge.cv2_to_compressed_imgmsg(map_bgr)
+        self.pub_debug_img.publish(weight_img)
+
         # Publish debug image
         if self._debug:
-            colors = {0: (0, 255, 255), 1: (0, 165, 255), 2: (0, 250, 0), 3: (0, 0, 255), 4: (255, 0, 0)}
-            names = {0: "duckie", 1: "cone", 2: "truck", 3: "bus", 4: "duckiebot"}
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            for clas, box in zip(classes, bboxes):
-                pt1 = np.array([int(box[0]), int(box[1])])
-                pt2 = np.array([int(box[2]), int(box[3])])
+             self.detect_debug(rgb, classes, bboxes)
 
-                pt1 = tuple(pt1)
-                pt2 = tuple(pt2)
-
-                color = tuple(reversed(colors[clas]))
-                name = names[clas]
-                
-                rgb = cv2.rectangle(rgb, pt1, pt2, color, thickness = 2)
-
-                # # label location
-                # text_location = (pt1[0], min(pt2[1] + 30, IMAGE_SIZE))
-
-                # rgb = cv2.putText(rgb, name, text_location, font, 1, color, thickness=2)
-
-            # Publish detection debug image
-            bgr = rgb[..., ::-1]
-            obj_det_img = self.bridge.cv2_to_compressed_imgmsg(bgr)
-            self.pub_detections_image.publish(obj_det_img)
 
     def det2bool(self, bboxes, classes, scores):
         box_ids = np.array(list(map(filter_by_bboxes, bboxes))).nonzero()[0]
@@ -228,9 +212,16 @@ class ObjectDetectionNode(DTROS):
         else:
             return False
     
-    def compute_commands(self, map) -> Tuple[float, float]:
-        """Returns the commands (pwm_left, pwm_right)"""
+    def compute_commands(self, map):
+        '''
+        Computes the left and right PWM commands based on the input map.
 
+        Args:
+            map (numpy.ndarray): The input map.
+
+        Returns:
+            float: The left PWM command.
+        '''
         # If we have not received any image, we don't move
         if map is None:
             return 0.0
@@ -238,11 +229,10 @@ class ObjectDetectionNode(DTROS):
         if self.left is None:
             # if it is the first time, we initialize the structures
             shape = map.shape[0], map.shape[1]
-            self.left = self.get_motor_left_matrix(shape)[0]
-            self.l_max = self.get_motor_left_matrix(shape)[1]
 
-            self.right = self.get_motor_right_matrix(shape)[0]
-            self.r_max = self.get_motor_right_matrix(shape)[1]
+            self.left = self.get_motor_left_matrix(shape)
+            self.right = self.get_motor_right_matrix(shape)
+
 
         # now we just compute the activation of our sensors
         l = float(np.sum(map * self.left))
@@ -266,35 +256,37 @@ class ObjectDetectionNode(DTROS):
         rs = self.rescale(r, self.r_min, self.r_max)
         self.log(f"after rescale: {ls}, {rs} \n max: {self.l_max}, {self.r_max} \n min: {self.l_min}, {self.r_min}")
 
-        pwm_left = self.const - rs * self.gain
-        pwm_left = self.rescale(pwm_left, 0, (self.gain+self.const))    # Max the pwm can be is (1*gain + const)
+        self.pwm_left = self.const + ls * self.gain
+        self.pwm_left = self.rescale(self.pwm_left, 0, (self.gain + self.const))    # Max the pwm can be is (1*gain + const)
         
-        pwm_right = self.const - ls * self.gain
-        pwm_right = self.rescale(pwm_right, 0, (self.gain+self.const))  # Max the pwm can be is (1*gain + const)
-        
-        # pwm_left = self.const + ls * self.gain
-        # pwm_left = self.rescale(pwm_left, 0, (self.gain+self.const))    # Max the pwm can be is (1*gain + const)
-        
-        # pwm_right = self.const + rs * self.gain
-        # pwm_right = self.rescale(pwm_right, 0, (self.gain+self.const))  # Max the pwm can be is (1*gain + const)
+        self.pwm_right = self.const + rs * self.gain
+        self.pwm_right = self.rescale(self.pwm_right, 0, (self.gain + self.const))  # Max the pwm can be is (1*gain + const)
 
-        self.log(f"ls: {pwm_left}, rs: {pwm_right}")
-
-        return pwm_left, pwm_right
+        self.log(f"ls: {self.pwm_left}, rs: {self.pwm_right}")
     
-    def pub_car_commands(self, pwm_left, pwm_right, header):
+    def pub_wheel_commands(self, pwm_left, pwm_right, header):
+        '''
+        Publishes the left and right PWM commands to the `pub_wheel_cmd` ROS topic.
+
+        Args:
+            pwm_left (float): The left PWM command.
+            pwm_right (float): The right PWM command.
+            header (std_msgs.msg.Header): The header for the `WheelsCmdStamped` message.
+
+        Returns:
+            None
+        '''
         wheel_control_msg = WheelsCmdStamped()
         wheel_control_msg.header = header
 
-        # always drive straight
+        # Wheel topic commands
         wheel_control_msg.vel_left = pwm_left
         self.log(f"vel_left: {wheel_control_msg.vel_left}")
 
-        # Turn based on bratienburg
         wheel_control_msg.vel_right = pwm_right
         self.log(f"vel_right: {wheel_control_msg.vel_right}")
 
-        self.pub_car_cmd.publish(wheel_control_msg)
+        self.pub_wheel_cmd.publish(wheel_control_msg)
     
 
     def rescale(self, a: float, L: float, U: float):
@@ -306,23 +298,28 @@ class ObjectDetectionNode(DTROS):
         return (a - L) / (U - L)
     
     def get_motor_left_matrix(self, shape: Tuple[int, int]) -> np.ndarray:
+        '''
+        Returns a matrix that represents the left haf image activation based on the `weight` attribute.
+
+        Args:
+            shape (Tuple[int, int]): The shape of the matrix.
+
+        Returns:
+            numpy.ndarray: The left motor activation matrix.
+        '''
         res = np.zeros(shape=shape, dtype="float32")
 
-        if self.weight == 0:
-            l_max = 0
-            # l_max = 2000000.0
+        if self.weight == 0:            # left half image
+
             res[:, :int(shape[1]/2)] = 1
 
-        elif self.weight == 1:
-            l_max = 100000.0
-            l_max = 0
+        elif self.weight == 1:          # Rectangle bottom Left corner
             half= int(shape[1]/2)
             width = 250
             res[width: , : half] = 1
 
-        elif self.weight == 2:
-            l_max = 0
-            # l_max = 994500.0
+        elif self.weight == 2:          # Triangle Bottom left 
+
             # Define the vertices of the triangle
             vertices = np.array([[0, shape[1]], [shape[1]/2, shape[1]], [shape[1]/2, 150]], np.int32)
 
@@ -333,27 +330,34 @@ class ObjectDetectionNode(DTROS):
             cv2.fillPoly(res, [vertices], color)# Define the vertices of the triangle
 
 
-        return res, l_max
+        return res
 
     def get_motor_right_matrix(self, shape: Tuple[int, int]) -> np.ndarray:
+        '''
+        Returns a matrix that represents the right haf image activation based on the `weight` attribute.
 
+        Args:
+            shape (Tuple[int, int]): The shape of the matrix.
+
+        Returns:
+            numpy.ndarray: The left motor activation matrix.
+        '''
         res = np.zeros(shape=shape, dtype="float32")
         
-        if self.weight == 0:
+        if self.weight == 0:                   # Right half image
             # r_max = 2000000.0
             r_max = 0 
             res[:, int(shape[1]/2):] = 1
 
-        elif self.weight == 1:
-            r_max = 100000.0
-            r_max = 0 
+        elif self.weight == 1:                 # Rectangle bottom right
+            #r_max = 100000.0
+  
             half= int(shape[1]/2)
             width = 250
             res[width: ,half :] = 1
             
-        elif self.weight == 2:
-            r_max = 0 
-            # r_max = 994500.0
+        elif self.weight == 2:                  # Triangle Bottom right 
+
             # Define the vertices of the triangle
             vertices = np.array([[shape[1], shape[1]], [shape[1]/2, shape[1]], [shape[1]/2, 150]], np.int32)
 
@@ -364,7 +368,79 @@ class ObjectDetectionNode(DTROS):
             color = (1)
             cv2.fillPoly(res, [vertices], color)# Define the vertices of the triangle
 
-        return res, r_max
+        return res
+    
+    def valid_detection(self, map_bare, bboxes, classes, scores):
+        '''
+        Draws filtered bounding boxes on the input `map_bare` image for valid object detections.
+
+        Args:
+            map_bare (numpy.ndarray): The input image.
+            bboxes (List[List[int]]): The bounding boxes for the detected objects.
+            classes (List[int]): The class labels for the detected objects.
+            scores (List[float]): The confidence scores for the detected objects.
+            start_time (float): The start time of the detection.
+            header (std_msgs.msg.Header): The header for the output image.
+
+        Returns:
+            numpy.ndarray: The output image with bounding boxes for valid object detections.
+        '''
+        for clas, box, score in zip(classes, bboxes, scores):
+            width = abs(box[2]-box[0])
+            length = abs(box[3]-box[1])
+            area = width*length
+            self.log(f"width: {width}, length: {length}, Area: {area}")
+            if clas == 0: 
+                if score > SCORE:
+                    if area > AREA:
+                        pt1 = np.array([int(box[0]), int(box[1])])
+                        pt2 = np.array([int(box[2]), int(box[3])])
+
+                        pt1 = tuple(pt1)
+                        pt2 = tuple(pt2)
+
+                        color = (0, 0, 255)
+                        # draw bounding box
+                        map_bare = cv2.rectangle(map_bare, pt1, pt2, color, thickness = 2)
+        return map_bare
+
+    def detect_debug(self, rgb, classes, bboxes):
+        '''
+        Draws bounding boxes on the input `rgb` image for detected duckies.
+
+        Args:
+            rgb (numpy.ndarray): The input image.
+            classes (List[int]): The class labels for the detected objects.
+            bboxes (List[List[int]]): The bounding boxes for the detected objects.
+
+        Returns:
+            None
+        '''
+        colors = {0: (0, 255, 255), 1: (0, 165, 255), 2: (0, 250, 0), 3: (0, 0, 255), 4: (255, 0, 0)}
+        #names = {0: "duckie", 1: "cone", 2: "truck", 3: "bus", 4: "duckiebot"}
+        # font = cv2.FONT_HERSHEY_SIMPLEX
+        for clas, box in zip(classes, bboxes):
+            if clas == 0: 
+            
+                pt1 = np.array([int(box[0]), int(box[1])])
+                pt2 = np.array([int(box[2]), int(box[3])])
+
+                pt1 = tuple(pt1)
+                pt2 = tuple(pt2)
+
+                color = tuple(reversed(colors[clas]))
+                # name = names[clas]
+                
+                rgb = cv2.rectangle(rgb, pt1, pt2, color, thickness = 2)
+
+                # # label location
+                # text_location = (pt1[0], min(pt2[1] + 30, IMAGE_SIZE))
+                # rgb = cv2.putText(rgb, name, text_location, font, 1, color, thickness=2)
+
+        # Publish detection debug image
+        bgr = rgb[..., ::-1]
+        obj_det_img = self.bridge.cv2_to_compressed_imgmsg(bgr)
+        self.pub_detections_image.publish(obj_det_img)
     
 if __name__ == "__main__":
     # Initialize the node
