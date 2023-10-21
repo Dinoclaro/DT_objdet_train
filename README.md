@@ -2,7 +2,7 @@
 
 ## About the Repository
 
-This repository contains two directories of code used in Project 60 of the 2023 MEC4128S UCT course. This project implements a YOLOv5 model and Bratienberg controller on the duckiebot. [DT_train](../DT_train/README.md) contains various python files that generate and format the dataset as well as a Google Colab notebook used to train the YOLOv5 model. [DT_ros](../DT_ros/README.md) contains the ROS agent as a Duckietown compliant Docker image. 
+This repository contains two directories of code used in Project 60 of the 2023 MEC4128S UCT course. This project implements a YOLOv5 model and Bratienberg controller on the duckiebot. [DT_train](../DT_train/README.md) contains various python files that generate and format the dataset as well as a Google Colab notebook used to train the YOLOv5 model. [DT_ros](../DT_ros/README.md) contains the ROS agent as a Duckietown-compliant Docker image. 
 
 ## Prerequisites
 
@@ -20,6 +20,14 @@ This repository contains two directories of code used in Project 60 of the 2023 
 
 ## Instructions
 
-1. Clone the `duckietown-lx`: the repository can be found [here](https://github.com/duckietown/duckietown-lx) and outlines provides instructions to clone the repository.
+1.  **Clone the Repository:**
+   - Open your terminal or command prompt.
+   - Navigate to the directory where you want to store the local copy of this repository.
+   - Use the following Git command to clone the repository:
+     ```shell
+     git clone https://github.com/Dinoclaro/DT_project_60.git
+     ```
 
-2. Navigate to the `DT_train` directory in this repository. The directory outlines the procedure to generate the dataset and then train the YOLOv5 model.
+2.**Clone the `duckietown-lx`**: follow [these](https://github.com/duckietown/duckietown-lx) instructions
+
+4. Navigate to the `DT_train` directory in this repository. The directory outlines the procedure to generate the dataset and then train the YOLOv5 model.
