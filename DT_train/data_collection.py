@@ -1,3 +1,9 @@
+"""
+This script contains functions for collecting data from the simulator.
+
+Disclaimer: Script is modified from Duckietown-lx/object-detection repo.
+"""
+
 import cv2
 import numpy as np
 
