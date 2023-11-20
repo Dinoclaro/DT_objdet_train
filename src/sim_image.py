@@ -22,7 +22,7 @@ SIMULATED_TRAIN_SPLIT_PERCENTAGE = 0.8
 IMAGE_SIZE = 416
 
 # Directory of dataset
-DATASET_DIR="/home/dino/DT_sim/duckietown_object_detection_dataset"
+DATASET_DIR="/Path/to/duckietown_object_detection_dataset"
 
 # Constants for resizing images 
 npz_index = 0

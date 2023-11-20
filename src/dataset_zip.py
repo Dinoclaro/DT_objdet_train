@@ -56,7 +56,7 @@ def zip_sub_dirs(abs_root_dir: str, lst_rel_subdirs: List[str], output_basename:
 # zip file basename for our dataset
 ZIPPED_DATASET_BASENAME_FILE = "duckietown_object_detection_dataset"
 # file/dir location constants
-DATASET_DIR="/home/dino/DT_sim/duckietown_object_detection_dataset"
+DATASET_DIR = "/Path/to/duckietown_object_detection_dataset"
 # path and file name (without file extension)
 ZIPPED_DATASET_BASENAME_FULL = os.path.join(DATASET_DIR, ZIPPED_DATASET_BASENAME_FILE)
 TRAIN_DIR = "train"
