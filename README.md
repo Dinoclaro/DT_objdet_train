@@ -1,8 +1,11 @@
-# **DT_project_60**
+# **DT_objdet_trian**
 
 ## About the Directory
 
-This directory is used for generating and formatting a Duckietown-specific dataset which is then used to train a YOLOv5 model. The dataset is made up of real and simulated images from the Duckietown dataset. Both real and simulated images are collected within the [duckietown-lx](https://github.com/duckietown/duckietown-lx/tree/mooc2022) environment as it eliminates the need to create a Python Virtual environment for the [duckietown-gym](https://github.com/duckietown/gym-duckietown) simulation environment. The model is trained using Google Colab to make use of the TPU resources.
+This directory is used for generating and formatting a Duckietown-specific dataset which is then used to train a YOLOv5 model. Once trained the YOLOv5 model can be run using the [DT_objdet](https://github.com/Dinoclaro/DT_objdet) repository on the same Github account. The dataset comprises real and simulated images from the publically available Duckietown dataset. Both real and simulated images are collected within the [duckietown-lx](https://github.com/duckietown/duckietown-lx/tree/mooc2022) environment. The model is trained using the Google Colab script found in this repository
+
+### NOTE: 
+If you would like to skip the training, use the following DT Token: `dt1-3nT8KSoxVh4MnDRxovGLkXZDhPpgc4SzasJBTSxbRUfDguS-43dzqWFnWd8KBa1yev1g3UKnzVxZkkTbfeFCAD1kMCPQvvSVDYPfoXapvF29wVgdC7` in the [constants.py](https://github.com/Dinoclaro/DT_objdet/blob/v3/packages/nn_model/constants.py) file from the  [DT_objdet](https://github.com/Dinoclaro/DT_objdet). 
 
 ## Prerequisites
 
